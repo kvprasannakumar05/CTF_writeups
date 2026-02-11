@@ -1,12 +1,12 @@
-# A Game of Circles and Crosses - CTF Writeup
+# A Game of Circles and Crosses 
 
 **CTF:** RootAccess2026  
 **Category:** Binary exploitation  
-**Difficulty:** Medium
+
 
 ---
 
-## Challenge Overview
+## Challenge Description
 
 This challenge presents a Python-based Tic-Tac-Toe game with a twist — the game is intentionally buggy. Instead of fixing the numerous client-side bugs, the solution involves understanding how the game verifies wins and directly communicating with the verification server to claim victory.
 
