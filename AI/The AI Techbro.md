@@ -2,7 +2,6 @@
 
 **CTF:** RootAccess2026  
 **Category:** AI  
-**Difficulty:** Hard
 
 ---
 
