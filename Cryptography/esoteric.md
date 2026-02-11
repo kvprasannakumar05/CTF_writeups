@@ -7,7 +7,7 @@
 <img width="554" height="188" alt="image" src="https://github.com/user-attachments/assets/0218b1a0-fc6e-4b49-b186-f8cdb2dda9a0" />
 
 
-Password : esoteric 
+Password : esoteric (the challenge title - just a random guess)
 
 We started by analyzing the provided image `images.jpeg`. Checking the metadata with `exiftool` revealed a suspicious string in the **Caption-Abstract** field.
 
