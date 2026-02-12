@@ -10,7 +10,7 @@ Welcome to my personal collection of Capture The Flag (CTF) writeups. This repos
 | Category | Description |
 | :--- | :--- |
 | **AI** | Challenges involving Large Language Models (LLMs), prompt injection, and AI security. |
-| ** Boot2Root** | Walkthroughs of full machine compromises (similar to HackTheBox or TryHackMe). |
+| **Boot2Root** | Walkthroughs of full machine compromises (similar to HackTheBox or TryHackMe). |
 | **Cryptography** | Breaking ciphers, encoding schemes, and math-based puzzles. |
 | **Forensics** | Analysis of memory dumps, PCAP files, steganography, and file formats. |
 | **Pwn** | Binary exploitation, buffer overflows, and memory corruption challenges. |
