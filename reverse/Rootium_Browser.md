@@ -4,7 +4,7 @@
 - **Category:** Reverse Engineering / Electron
 
 ## Overview
-We were given a custom Electron-based browser with a "Secret Vault" feature locked by a master password. The goal was to reverse the authentication mechanism to unlock the vault and retrieve the root flag.
+We were given a custom Electron-based browser with a "Secret Vault" feature locked by a master password. The goal was to reverse the authentication mechanism to unlock the vault  and retrieve the root flag.
 
 ## 1. Recon & Extraction
 Since the challenge provided a `.deb` Linux installer, I started by extracting the contents.
@@ -36,5 +36,5 @@ With the password recovered, I applied the second algorithm to the encrypted fla
 * *Algorithm:* `((byte ^ 0x7E) >>> (i % 8)) ^ password_byte`
 
 ## Final Flag
-```text
+```text  
 root{n0_m0r3_34sy_v4ult_3xtr4ct10n_99}
