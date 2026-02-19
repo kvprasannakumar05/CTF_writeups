@@ -10,7 +10,7 @@
 **Clue:** `Seed = 739391`
 
 ---
-<img width="434" height="596" alt="image" src="https://github.com/user-attachments/assets/38a33ffa-65a1-4689-9515-92bebac5e206" />
+<img width="434" height="596"  alt="image" src="https://github.com/user-attachments/assets/38a33ffa-65a1-4689-9515-92bebac5e206" />
 
 ## Author's Note
 
