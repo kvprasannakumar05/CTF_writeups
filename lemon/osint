@@ -1,3 +1,8 @@
 
 I post videos — btw @LDa-p2i… not sure how well he keeps it concealed
 DCxTCTF{...}
+
+----
+
+A notorious cybercriminal known only as "darkcryptguy" has fled India after orchestrating a massive cryptocurrency scam worth ₹500 crores. The CBI's Cyber Crime Division has been tracking him for months, but he's gone dark. All they have is his online alias and fragments of his digital footprint. Your mission: Find his exact location before he disappears forever.
+Format: DCxTCTF{EmailID,LocationCoordinates} Example: DCxTCTF{something@something.com,00.000,00.000}
